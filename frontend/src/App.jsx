@@ -286,6 +286,14 @@ function App() {
               {isListening ? "Listening..." : isProcessing ? "AI is generating music..." : "Tap to ask AI to tweak this playlist..."}
             </p>
 
+            {!isListening && !isProcessing && (
+              <div className="suggestions-container" style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '15px' }}>
+                <button className="suggestion-pill" onClick={() => processVoiceCommand("Keep the vibe")}>"Keep the vibe"</button>
+                <button className="suggestion-pill" onClick={() => processVoiceCommand("Surprise me")}>"Surprise me"</button>
+                <button className="suggestion-pill" onClick={() => processVoiceCommand("Play something new like Karan Aujhla")}>"Play something new like Karan Aujhla"</button>
+              </div>
+            )}
+
             {transcript && (
               <div className="transcript-box">
                 <p><strong>You said:</strong> "{transcript}"</p>

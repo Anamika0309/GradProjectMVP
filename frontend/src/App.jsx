@@ -293,28 +293,6 @@ function App() {
               </div>
             </div>
 
-            {generatedQueue.length > 1 && (
-              <div className="queue-container">
-                <h4>Up Next: AI Discovery Queue</h4>
-                {generatedQueue.map((song, idx) => {
-                  if (idx <= currentSongIndex) return null;
-                  return (
-                    <div key={idx} className="queue-item">
-                        {song.albumArt ? (
-                        <img src={song.albumArt} alt="Album Art" className="queue-art" />
-                        ) : (
-                        <div className="queue-art placeholder"></div>
-                        )}
-                        <div className="queue-info">
-                            <h5>{song.name}</h5>
-                            <p>{song.artist}</p>
-                        {song.badge && <span className="badge discovery-badge">{song.badge}</span>}
-                        </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
 
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: '30px' }}>
                 <button 
@@ -335,6 +313,29 @@ function App() {
                 <button className="suggestion-pill" onClick={() => processVoiceCommand("Keep the vibe")}>"Keep the vibe"</button>
                 <button className="suggestion-pill" onClick={() => processVoiceCommand("Surprise me")}>"Surprise me"</button>
                 <button className="suggestion-pill" onClick={() => processVoiceCommand("Play something new like Karan Aujhla")}>"Play something new like Karan Aujhla"</button>
+              </div>
+            )}
+
+            {generatedQueue.length > 1 && (
+              <div className="queue-container">
+                <h4>Up Next: AI Discovery Queue</h4>
+                {generatedQueue.map((song, idx) => {
+                  if (idx <= currentSongIndex) return null;
+                  return (
+                    <div key={idx} className="queue-item">
+                        {song.albumArt ? (
+                        <img src={song.albumArt} alt="Album Art" className="queue-art" />
+                        ) : (
+                        <div className="queue-art placeholder"></div>
+                        )}
+                        <div className="queue-info">
+                            <h5>{song.name}</h5>
+                            <p>{song.artist}</p>
+                        {song.badge && <span className="badge discovery-badge">{song.badge}</span>}
+                        </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
 

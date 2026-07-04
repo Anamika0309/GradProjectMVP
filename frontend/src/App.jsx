@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Play, Mic, User, Loader2, Volume2, Pause } from 'lucide-react';
+import { Play, Mic, User, Loader2, Pause, Sparkles } from 'lucide-react';
 import './index.css';
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -8,7 +8,7 @@ const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080';
 
-// Helper: Search iTunes API from the Frontend (bypass server IP blocks)
+// Helper: Search iTunes API from the Frontend
 async function searchITunesClient(query, badge = "") {
   try {
       const res = await axios.get(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`);
@@ -19,7 +19,8 @@ async function searchITunesClient(query, badge = "") {
               artist: track.artistName,
               albumArt: track.artworkUrl100, 
               previewUrl: track.previewUrl,
-              badge: badge
+              badge: badge,
+              isDiscovery: badge !== "" // Flag to indicate if it's an AI discovery track
           };
       }
   } catch (err) {
@@ -74,6 +75,40 @@ function App() {
     }
   };
 
+  // FEATURE 1: Initial Base Playlist (No Discovery Logic)
+  const startCommute = async (type) => {
+    setIsProcessing(true);
+    try {
+      await axios.post(`${API_BASE}/api/session/start`, { commuteType: type });
+      setActiveSession(type);
+      
+      const res = await axios.post(`${API_BASE}/api/playlist/base`, { commuteType: type });
+      if (res.data.base_playlist) {
+        const i = res.data.base_playlist;
+        const queries = [
+            { query: i.song_1, badge: "" },
+            { query: i.song_2, badge: "" },
+            { query: i.song_3, badge: "" },
+            { query: i.song_4, badge: "" },
+            { query: i.song_5, badge: "" }
+        ];
+        const promises = queries.map(q => searchITunesClient(q.query, q.badge));
+        const results = await Promise.all(promises);
+        const newSongs = results.filter(song => song !== null);
+        
+        if (newSongs.length > 0) {
+          setGeneratedQueue(newSongs);
+          setCurrentSongIndex(0);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to start commute on backend", err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // FEATURE 2: Discovery Slider (Appends to Queue)
   const handleSliderChange = async (e) => {
     const val = e.target.value;
     setSliderValue(val);
@@ -86,21 +121,16 @@ function App() {
       if (res.data.search_queries) {
         const i = res.data.search_queries;
         const queries = [
-            { query: i.anchor_song, badge: "Trust Anchor" },
-            { query: i.similar_song, badge: "Similar Sound" },
-            { query: i.mood_song, badge: "Same Mood" },
-            { query: i.exploratory_song, badge: "Slightly Exploratory" },
-            { query: i.gem_song, badge: "Hidden Gem" }
+            { query: i.anchor_song, badge: "Slider: Anchor" },
+            { query: i.exploratory_song, badge: "Slider: Explore" },
+            { query: i.gem_song, badge: "Slider: Gem" }
         ];
         const promises = queries.map(q => searchITunesClient(q.query, q.badge));
         const results = await Promise.all(promises);
         const newSongs = results.filter(song => song !== null);
         
         if (newSongs.length > 0) {
-          setGeneratedQueue(newSongs);
-          setCurrentSongIndex(0);
-        } else {
-          alert("Couldn't find those songs on iTunes. Please try tweaking the slider again.");
+          setGeneratedQueue(prev => [...prev, ...newSongs]);
         }
       }
     } catch (err) {
@@ -110,6 +140,7 @@ function App() {
     }
   };
 
+  // FEATURE 3: Voice Mic (Appends to Queue)
   useEffect(() => {
     if (recognition) {
       recognition.continuous = false;
@@ -133,38 +164,6 @@ function App() {
       };
     }
   }, [activeSession]);
-
-  const startCommute = async (type) => {
-    setIsProcessing(true);
-    try {
-      await axios.post(`${API_BASE}/api/session/start`, { commuteType: type });
-      setActiveSession(type);
-      
-      const res = await axios.post(`${API_BASE}/api/queue/generate`, { commuteType: type, sliderLevel: sliderValue });
-      if (res.data.search_queries) {
-        const i = res.data.search_queries;
-        const queries = [
-            { query: i.anchor_song, badge: "Trust Anchor" },
-            { query: i.similar_song, badge: "Similar Sound" },
-            { query: i.mood_song, badge: "Same Mood" },
-            { query: i.exploratory_song, badge: "Slightly Exploratory" },
-            { query: i.gem_song, badge: "Hidden Gem" }
-        ];
-        const promises = queries.map(q => searchITunesClient(q.query, q.badge));
-        const results = await Promise.all(promises);
-        const newSongs = results.filter(song => song !== null);
-        
-        if (newSongs.length > 0) {
-          setGeneratedQueue(newSongs);
-          setCurrentSongIndex(0);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to start commute on backend", err);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   const handleMicClick = () => {
     if (!recognition) {
@@ -190,13 +189,12 @@ function App() {
       if (res.data.intent && res.data.intent.action === 'play_new_queue') {
         const i = res.data.intent;
         const queries = [i.song_1, i.song_2, i.song_3].filter(Boolean);
-        const promises = queries.map(q => searchITunesClient(q, "Voice Request"));
+        const promises = queries.map(q => searchITunesClient(q, "Voice Suggestion"));
         const results = await Promise.all(promises);
         const newSongs = results.filter(song => song !== null);
         
         if (newSongs.length > 0) {
-          setGeneratedQueue(newSongs);
-          setCurrentSongIndex(0);
+          setGeneratedQueue(prev => [...prev, ...newSongs]);
         } else {
           alert("Couldn't find the requested songs on iTunes. Please try again.");
         }
@@ -249,10 +247,11 @@ function App() {
           </div>
         ) : (
           <div className="active-session">
-            <h3>Active: {activeSession} Commute</h3>
+            <h3 style={{ marginBottom: '10px' }}>Active: {activeSession}</h3>
             
+            {/* THE PLAYER */}
             {generatedQueue.length > 0 && generatedQueue[currentSongIndex] && (
-              <div className="now-playing" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="now-playing" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                     {generatedQueue[currentSongIndex].albumArt ? (
                     <img src={generatedQueue[currentSongIndex].albumArt} alt="Album Art" className="album-art" />
@@ -275,7 +274,42 @@ function App() {
               </div>
             )}
 
-            <div className="discovery-controls">
+            {/* UP NEXT PLAYLIST */}
+            {generatedQueue.length > 1 && (
+              <div className="queue-container" style={{ marginBottom: '30px' }}>
+                <h4>Up Next</h4>
+                {generatedQueue.map((song, idx) => {
+                  if (idx <= currentSongIndex) return null;
+                  return (
+                    <div key={idx} className="queue-item" style={{ borderLeft: song.isDiscovery ? '3px solid var(--spotify-green)' : 'none' }}>
+                        {song.albumArt ? (
+                        <img src={song.albumArt} alt="Album Art" className="queue-art" />
+                        ) : (
+                        <div className="queue-art placeholder"></div>
+                        )}
+                        <div className="queue-info">
+                            <h5>{song.name}</h5>
+                            <p>{song.artist}</p>
+                        {song.badge && <span className="badge discovery-badge">{song.badge}</span>}
+                        </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* VISUAL DIVIDER */}
+            <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.1)', width: '100%', margin: '20px 0' }} />
+            
+            {/* AI DJ TOOLS SECTION */}
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <h3 style={{ color: 'var(--spotify-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                    <Sparkles size={20} /> AI DJ Tools <Sparkles size={20} />
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Use the slider or voice mic to append new songs to your queue!</p>
+            </div>
+
+            <div className="discovery-controls" style={{ marginBottom: '20px' }}>
               <h4>Discovery Level</h4>
               <input 
                 type="range" 
@@ -293,8 +327,7 @@ function App() {
               </div>
             </div>
 
-
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '30px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
                 <button 
                 className={`mic-button ${isListening ? 'listening' : ''}`} 
                 onClick={handleMicClick}
@@ -305,7 +338,7 @@ function App() {
             </div>
             
             <p className="mic-hint" style={{ textAlign: 'center' }}>
-              {isListening ? "Listening..." : isProcessing ? "AI is generating music..." : "Tap to ask AI to tweak this playlist..."}
+              {isListening ? "Listening..." : isProcessing ? "AI is generating music..." : "Tap to voice search"}
             </p>
 
             {!isListening && !isProcessing && (
@@ -313,29 +346,6 @@ function App() {
                 <button className="suggestion-pill" onClick={() => processVoiceCommand("Keep the vibe")}>"Keep the vibe"</button>
                 <button className="suggestion-pill" onClick={() => processVoiceCommand("Surprise me")}>"Surprise me"</button>
                 <button className="suggestion-pill" onClick={() => processVoiceCommand("Play something new like Karan Aujhla")}>"Play something new like Karan Aujhla"</button>
-              </div>
-            )}
-
-            {generatedQueue.length > 1 && (
-              <div className="queue-container">
-                <h4>Up Next: AI Discovery Queue</h4>
-                {generatedQueue.map((song, idx) => {
-                  if (idx <= currentSongIndex) return null;
-                  return (
-                    <div key={idx} className="queue-item">
-                        {song.albumArt ? (
-                        <img src={song.albumArt} alt="Album Art" className="queue-art" />
-                        ) : (
-                        <div className="queue-art placeholder"></div>
-                        )}
-                        <div className="queue-info">
-                            <h5>{song.name}</h5>
-                            <p>{song.artist}</p>
-                        {song.badge && <span className="badge discovery-badge">{song.badge}</span>}
-                        </div>
-                    </div>
-                  );
-                })}
               </div>
             )}
 

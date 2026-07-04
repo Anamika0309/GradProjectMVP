@@ -26,6 +26,42 @@ app.post('/api/session/start', (req, res) => {
     res.json({ success: true, session: currentDriveSession });
 });
 
+// New Endpoint: Generates a STANDARD, clean playlist with no discovery logic.
+app.post('/api/playlist/base', async (req, res) => {
+    const { commuteType } = req.body;
+    if (!commuteType) return res.status(400).json({ error: "No commute type provided" });
+
+    try {
+        const prompt = `
+        You are an expert DJ creating a core playlist for a user's commute. 
+        The commute style is: "${commuteType}".
+        
+        Generate exactly 5 highly cohesive song recommendations that fit this exact mood perfectly.
+        Return ONLY a JSON object exactly like this (use REAL song titles and REAL artists):
+        {
+            "song_1": "Song Name Artist Name",
+            "song_2": "Song Name Artist Name",
+            "song_3": "Song Name Artist Name",
+            "song_4": "Song Name Artist Name",
+            "song_5": "Song Name Artist Name"
+        }`;
+
+        const completion = await groq.chat.completions.create({
+            messages: [{ role: "user", content: prompt }],
+            model: "llama-3.1-8b-instant",
+            temperature: 0.5,
+            response_format: { type: "json_object" }
+        });
+
+        const intent = JSON.parse(completion.choices[0].message.content);
+        res.json({ success: true, base_playlist: intent });
+    } catch (error) {
+        console.error("Error generating base playlist:", error);
+        res.status(500).json({ error: "Failed to generate playlist" });
+    }
+});
+
+// Discovery Slider Endpoint
 app.post('/api/queue/generate', async (req, res) => {
     const { commuteType, sliderLevel } = req.body;
     if (!commuteType) return res.status(400).json({ error: "No commute type provided" });
@@ -36,16 +72,14 @@ app.post('/api/queue/generate', async (req, res) => {
         if (sliderLevel == 3) sliderText = "completely new discovery";
 
         const prompt = `
-        You are an AI generating a progressive discovery playlist. 
+        You are an AI generating a progressive discovery playlist addition. 
         The user selected the commute card: "${commuteType}".
-        The user's discovery slider is set to: ${sliderText}.
+        The user tweaked the discovery slider to: ${sliderText}.
         
-        Generate exactly 5 highly specific song recommendations that perfectly match this mood.
-        Return ONLY a JSON object exactly like this (use REAL song titles and REAL artists):
+        Generate exactly 3 highly specific song recommendations to add to the queue that fit this new discovery level.
+        Return ONLY a JSON object exactly like this:
         {
             "anchor_song": "Song Name Artist Name",
-            "similar_song": "Song Name Artist Name",
-            "mood_song": "Song Name Artist Name",
             "exploratory_song": "Song Name Artist Name",
             "gem_song": "Song Name Artist Name"
         }`;
@@ -58,7 +92,6 @@ app.post('/api/queue/generate', async (req, res) => {
         });
 
         const intent = JSON.parse(completion.choices[0].message.content);
-        // Return only the intent, let the frontend search iTunes
         res.json({ success: true, search_queries: intent });
     } catch (error) {
         console.error("Error generating queue:", error);
@@ -73,9 +106,9 @@ app.post('/api/voice/intent', async (req, res) => {
     try {
         const prompt = `
         You are an AI for a car music player. The user is on a ${currentDriveSession.commuteType} commute.
-        The user just said: "${command}"
+        The user just tapped the AI DJ mic and said: "${command}"
         
-        Convert this into 3 specific song recommendations that fit the request perfectly.
+        Generate exactly 3 specific song recommendations that fit their voice request perfectly.
         Return ONLY a JSON object with this exact structure, nothing else:
         {
             "action": "play_new_queue",
@@ -87,12 +120,11 @@ app.post('/api/voice/intent', async (req, res) => {
         const completion = await groq.chat.completions.create({
             messages: [{ role: "user", content: prompt }],
             model: "llama-3.1-8b-instant",
-            temperature: 0,
+            temperature: 0.6,
             response_format: { type: "json_object" }
         });
 
         const intent = JSON.parse(completion.choices[0].message.content);
-        // Return only the intent, let the frontend search iTunes
         res.json({ success: true, intent });
     } catch (error) {
         console.error("Error:", error);

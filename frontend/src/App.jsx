@@ -8,12 +8,31 @@ const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080';
 
+// Helper: Search iTunes API from the Frontend (bypass server IP blocks)
+async function searchITunesClient(query, badge = "") {
+  try {
+      const res = await axios.get(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`);
+      if (res.data && res.data.results && res.data.results.length > 0) {
+          const track = res.data.results[0];
+          return {
+              name: track.trackName,
+              artist: track.artistName,
+              albumArt: track.artworkUrl100, 
+              previewUrl: track.previewUrl,
+              badge: badge
+          };
+      }
+  } catch (err) {
+      console.error("iTunes Search Error for", query, err.message);
+  }
+  return null;
+}
+
 function App() {
   const [activeSession, setActiveSession] = useState(null);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [aiResponse, setAiResponse] = useState(null);
   const [sliderValue, setSliderValue] = useState(2);
   const [generatedQueue, setGeneratedQueue] = useState([]);
   
@@ -22,7 +41,6 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef(null);
 
-  // Auto-play the current song when it changes
   useEffect(() => {
     if (generatedQueue.length > 0 && currentSongIndex < generatedQueue.length) {
       const song = generatedQueue[currentSongIndex];
@@ -32,7 +50,6 @@ function App() {
           audioRef.current.play().then(() => setIsPlaying(true)).catch(e => console.error("Auto-play prevented", e));
         }
       } else {
-        // Skip to next if no preview available
         handleNextSong();
       }
     }
@@ -65,19 +82,32 @@ function App() {
     try {
       await axios.post(`${API_BASE}/api/session/start`, { commuteType: activeSession, sliderLevel: val });
       const res = await axios.post(`${API_BASE}/api/queue/generate`, { commuteType: activeSession, sliderLevel: val });
-      if (res.data.newSongs) {
-          setGeneratedQueue(res.data.newSongs);
+      
+      if (res.data.search_queries) {
+        const i = res.data.search_queries;
+        const queries = [
+            { query: i.anchor_song, badge: "Trust Anchor" },
+            { query: i.similar_song, badge: "Similar Sound" },
+            { query: i.mood_song, badge: "Same Mood" },
+            { query: i.exploratory_song, badge: "Slightly Exploratory" },
+            { query: i.gem_song, badge: "Hidden Gem" }
+        ];
+        const promises = queries.map(q => searchITunesClient(q.query, q.badge));
+        const results = await Promise.all(promises);
+        const newSongs = results.filter(song => song !== null);
+        
+        if (newSongs.length > 0) {
+          setGeneratedQueue(newSongs);
           setCurrentSongIndex(0);
+        } else {
+          alert("Couldn't find those songs on iTunes. Please try tweaking the slider again.");
+        }
       }
     } catch (err) {
       console.error(err);
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const handleFeedback = (feedbackType) => {
-    alert(`Feedback sent: ${feedbackType}. AI has adapted its logic!`);
   };
 
   useEffect(() => {
@@ -111,9 +141,23 @@ function App() {
       setActiveSession(type);
       
       const res = await axios.post(`${API_BASE}/api/queue/generate`, { commuteType: type, sliderLevel: sliderValue });
-      if (res.data.newSongs) {
-          setGeneratedQueue(res.data.newSongs);
+      if (res.data.search_queries) {
+        const i = res.data.search_queries;
+        const queries = [
+            { query: i.anchor_song, badge: "Trust Anchor" },
+            { query: i.similar_song, badge: "Similar Sound" },
+            { query: i.mood_song, badge: "Same Mood" },
+            { query: i.exploratory_song, badge: "Slightly Exploratory" },
+            { query: i.gem_song, badge: "Hidden Gem" }
+        ];
+        const promises = queries.map(q => searchITunesClient(q.query, q.badge));
+        const results = await Promise.all(promises);
+        const newSongs = results.filter(song => song !== null);
+        
+        if (newSongs.length > 0) {
+          setGeneratedQueue(newSongs);
           setCurrentSongIndex(0);
+        }
       }
     } catch (err) {
       console.error("Failed to start commute on backend", err);
@@ -128,14 +172,12 @@ function App() {
       return;
     }
     
-    // Pause music when listening
     if (isPlaying && audioRef.current) {
         audioRef.current.pause();
         setIsPlaying(false);
     }
 
     setTranscript("");
-    setAiResponse(null);
     setIsListening(true);
     recognition.start();
   };
@@ -144,14 +186,23 @@ function App() {
     setIsProcessing(true);
     try {
       const res = await axios.post(`${API_BASE}/api/voice/intent`, { command: text });
-      setAiResponse(res.data.intent);
-      if (res.data.newSongs) {
-          setGeneratedQueue(res.data.newSongs);
+      
+      if (res.data.intent && res.data.intent.action === 'play_new_queue') {
+        const i = res.data.intent;
+        const queries = [i.song_1, i.song_2, i.song_3].filter(Boolean);
+        const promises = queries.map(q => searchITunesClient(q, "Voice Request"));
+        const results = await Promise.all(promises);
+        const newSongs = results.filter(song => song !== null);
+        
+        if (newSongs.length > 0) {
+          setGeneratedQueue(newSongs);
           setCurrentSongIndex(0);
+        } else {
+          alert("Couldn't find the requested songs on iTunes. Please try again.");
+        }
       }
     } catch (err) {
       console.error("Failed to process voice command", err);
-      setAiResponse({ error: "Failed to connect to AI" });
     } finally {
       setIsProcessing(false);
     }
@@ -159,7 +210,6 @@ function App() {
 
   return (
     <div className="app-container">
-      {/* Hidden Audio Element for Previews */}
       <audio 
         ref={audioRef} 
         onEnded={handleNextSong} 
@@ -167,36 +217,30 @@ function App() {
         hidden
       />
 
-      {/* Header */}
       <header className="header">
         <h2>AI Music Player</h2>
         <User size={24} />
       </header>
 
-      {/* Main Content */}
       <main className="main-content">
         {!activeSession ? (
           <div className="cards-container">
             <h3>Smart Commute Cards</h3>
-            
             <div className="commute-card" onClick={() => startCommute('Monday Morning Boost')}>
               <h4>Monday Morning Boost ☕</h4>
               <p>High energy, motivating, coffee vibes</p>
               <button><Play size={16} /> Select</button>
             </div>
-            
             <div className="commute-card" onClick={() => startCommute('Evening Wind Down')}>
               <h4>Evening Wind Down 🌙</h4>
               <p>Relaxing music, chill beats, de-stress</p>
               <button><Play size={16} /> Select</button>
             </div>
-            
             <div className="commute-card" onClick={() => startCommute('Rainy Day Drive')}>
               <h4>Rainy Day Drive 🌧️</h4>
               <p>Acoustic, melancholy, cozy vocals</p>
               <button><Play size={16} /> Select</button>
             </div>
-
             <div className="commute-card" onClick={() => startCommute('Party Pre-Game')}>
               <h4>Party Pre-Game 🍻</h4>
               <p>Upbeat, dance, high energy party songs</p>
@@ -253,7 +297,7 @@ function App() {
               <div className="queue-container">
                 <h4>Up Next: AI Discovery Queue</h4>
                 {generatedQueue.map((song, idx) => {
-                  if (idx <= currentSongIndex) return null; // Skip played/playing songs
+                  if (idx <= currentSongIndex) return null;
                   return (
                     <div key={idx} className="queue-item">
                         {song.albumArt ? (
@@ -297,13 +341,6 @@ function App() {
             {transcript && (
               <div className="transcript-box">
                 <p><strong>You said:</strong> "{transcript}"</p>
-              </div>
-            )}
-
-            {aiResponse && !aiResponse.error && (
-              <div className="ai-response-box">
-                <p><strong>Groq AI Decision:</strong></p>
-                <pre>{JSON.stringify(aiResponse, null, 2)}</pre>
               </div>
             )}
           </div>
